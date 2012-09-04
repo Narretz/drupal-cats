@@ -1,0 +1,223 @@
+<?php
+
+function cats_link_alter(&$links, $node){
+
+    $all = cats_comment_num_all($node->nid, $node->tnid);
+	   
+	 /*
+	 ** The "new comments"  message is only displayed once for each translation set. 
+	 ** So if a user read new comments on the German version of a node, 
+	 ** they won't see the same new comments message on the English node. 
+	 ** When determining the number of new comments, 
+	 ** the latest viewed node of the translation set is used as the base.
+	 */
+	  
+	$latest_nid = get_last_viewed_node($node);
+	   
+	$new = cats_comment_num_new($latest_nid, $node->tnid, $timestamp);
+    
+	//Create comment links and new comment links for all all views (teaser and full)
+		
+	$comment_type = $node->comment_type;
+
+	if ($links['comment_comments']) 
+	{
+		$links['comment_comments']['title'] = theme('nodecomment_comment_count', $all, $comment_type);
+	} else {
+		//Add the number of comments to the full node link section	
+		if($all)
+		{
+			$comment_comments = array(
+				  'title' => theme('nodecomment_comment_count', $all, $node->comment_type),
+				  'href' => "node/$node->nid",
+				  'attributes' => array('title' => t('Jump to the first comment of this posting.')),
+				  'fragment' => 'comments'
+				);
+
+			array_splice($links, 1, 0, array($comment_comments));
+		}
+	}
+
+	
+	if($new)
+	{
+		if($links['comment_new_comments']) 
+		{
+			$links['comment_new_comments']['title'] = theme('nodecomment_new_comment_count', $new, $comment_type);
+			$links['comment_new_comments']['query'] = nodecomment_new_page_count($all, $new, $node);
+		} else {
+			$comment_new_comments = array(
+				'title' => theme('nodecomment_new_comment_count', $new, $node->comment_type),
+                'href' => "node/$node->nid",
+                'query' => nodecomment_new_page_count($all, $new, $node),
+                'attributes' => array('title' => t('Jump to the first new comment of this posting.')),
+                'fragment' => 'new'
+				);
+				
+			//place new comments link first in link section
+			array_unshift($links, $comment_new_comments);
+		}
+	}
+
+}
+
+
+function cats_comment_num_all($nid, $tnid) { // change to count comments across a translation set
+  	static $cache;
+
+  	if (!isset($cache[$nid])) 
+  	{
+		//use the normal function if the node is not translated
+		if($tnid  == 0)
+		{
+			$cache[$nid]  = comment_num_all($nid);
+		} else {
+			$cache[$nid] = db_result(db_query('SELECT SUM( node_comment_statistics.comment_count ) AS comment_count
+					FROM node node
+					LEFT JOIN node t_node ON node.tnid = t_node.nid
+					LEFT JOIN node node_node_1 ON t_node.nid = node_node_1.tnid
+					LEFT JOIN node_comment_statistics node_comment_statistics ON node.nid = node_comment_statistics.nid
+					WHERE (
+					node.status <>%d
+					)
+					AND (
+					node_node_1.nid =%d)', 0, $nid));
+			echo $nid.' translated: '.$cache[$nid].'<br>';	
+		}
+ 	}
+
+  	return $cache[$nid];
+}
+
+
+function cats_comment_num_new($nid, $tnid, $timestamp = 0) {
+  	global $user;
+
+  	if ($user->uid) 
+  	{
+	    // Retrieve the timestamp at which the current user last viewed the specified node.
+	    if (!$timestamp) 
+	    	$timestamp = node_last_viewed($nid);
+
+	    $timestamp = ($timestamp > NODE_NEW_LIMIT ? $timestamp : NODE_NEW_LIMIT);
+		//if the node is not translated, do not attempt joins
+		if($tnid == 0)
+		{
+				// Use the timestamp to retrieve the number of new comments.
+				$result = db_result(db_query('SELECT COUNT(cn.nid) FROM {node} n INNER JOIN {node_comments} 
+				c ON n.nid = c.nid INNER JOIN {node} cn ON c.cid = cn.nid WHERE n.nid = %d AND (cn.created > %d OR cn.changed > %d) AND cn.status = %d', $nid, $timestamp, $timestamp, 1));
+				
+		} else {
+			$result = db_result(db_query('SELECT count(node.nid) AS count
+				 FROM node node 
+				 LEFT JOIN node_comments node_comments ON node.nid = node_comments.cid
+				 LEFT JOIN node node_node_comments ON node_comments.nid = node_node_comments.nid
+				 LEFT JOIN node node_node ON node_node_comments.tnid = node_node.nid
+				 LEFT JOIN node node_node_1 ON node_node.nid = node_node_1.tnid WHERE (node.status = %d) AND (node_node_1.nid = %d) AND (node.created > %d OR node.changed > %d)', 1, $nid, $timestamp, $timestamp));
+		}
+	    return $result;
+	}
+	else {
+		return 0;
+	}
+  
+}
+  
+function cats_theme_registry_alter(&$items) {
+	array_unshift($items['node']['theme paths'], drupal_get_path('module', 'cats'));
+}
+  
+//Base from nodecomments module.
+//A comment is only marked as new to a user based on the latest viewed node of the translation-set
+function cats_preprocess_node(&$vars){
+	// Test to see if it's a comment.
+	if (isset($vars['node']->comment_target_nid)) 
+	{
+	    $node = &$vars['node'];
+
+	    // node-comment automatically gets 'node-comment' due to its typing, so
+	    // let's not add it again.
+	    if ($node->type != 'comment')
+	      array_unshift($vars['template_files'], 'node-comment');
+
+	    // Add node-comment-$type after node-comment AND the specific node type.
+	    array_splice($vars['template_files'], 1, 0, 'node-comment-'. $node->type);
+
+		if (views_api_version() == 3) 
+		{
+			$cache = $node->view->display_handler->get_plugin('cache');
+		} else {
+			$cache = $node->view->display_handler->get_cache_plugin();
+		}
+
+	  	if (isset($node->view) && $cache && get_class($cache) != 'views_plugin_cache_none') 
+	  	{
+			// Caching is enabled, so use tokens instead of real values.
+			$vars['new'] = '';
+			$vars['first_new'] = "<!--post:first-new-$node->nid-->";
+			$vars['new_output'] = "<!--post:new-$node->nid-->";
+			$vars['new_class'] = "<!--post:new-class-$node->nid-->";
+			$vars['classes'] = (isset($vars['classes']) ? $vars['classes'] . ' ' : '') . $vars['new_class'];
+		} else {
+			// First comment checking.
+			static $first_new = TRUE;
+
+			$vars['new'] = '';
+			$vars['new_class'] = '';
+			$vars['new_output'] = '';
+			$vars['first_new'] = '';
+		  
+			//Find out the latest viewed node of the translation set
+			//Load the node to get the tnid
+			$parent_node = node_load($node->comment_target_nid);
+			
+			$latest_nid = get_last_viewed_node($parent_node);
+		  
+			$node->new = node_mark($latest_nid, $node->created);
+			if ($node->new) {
+			$vars['new'] = t('new');
+			$vars['new_class'] = 'comment-new';
+			$vars['classes'] = (isset($vars['classes']) ? $vars['classes'] . ' ' : '') . 'comment-new';
+			$vars['new_output'] ='<span class="new">' . $vars['new'] . '</span>';
+				if ($first_new) {
+				  $vars['first_new'] = "<a id=\"new\"></a>\n";
+				  $first_new = FALSE;
+				}
+			}
+		}
+
+	    $query = NULL;
+
+	    if ($vars['page'])
+	      $pagenum = nodecomment_page_count($node);
+	    else
+	      $pagenum = !empty($_GET['page']) ? $_GET['page'] : 0;
+
+	    if ($pagenum)
+	      $query = array('page' => $pagenum);
+
+	    $vars['comment_link'] = l($node->title, 'node/'. $node->comment_target_nid, array('query' => $query, 'fragment' => 'comment-' . $node->nid));
+	    $vars['signature'] = !empty($node->signature) ? theme('user_signature', $node->signature) : '';
+	}
+}
+
+//Returns the nid of the last viewed node of a translationset
+function get_last_viewed_node($node){
+	if($node->tnid > 0)
+	{
+		$trans = translation_node_get_translations($node->tnid);
+
+		foreach($trans as $lang => $tnode){
+			$arr[$tnode->nid] = node_last_viewed($tnode->nid);
+		}
+		
+		$latest_timestamp = max($arr);
+		$latest_nid = array_search($latest_timestamp, $arr);
+		
+		return $latest_nid;
+
+	} else {
+		return $node->nid;
+	}
+}
+

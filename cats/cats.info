@@ -1,0 +1,4 @@
+name = Comments across translations set
+description = Displays the number of comments for a complete translationset.
+dependencies[] = nodecomment    
+core = 6.x
