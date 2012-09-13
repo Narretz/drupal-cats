@@ -82,7 +82,6 @@ function cats_comment_num_all($nid, $tnid) { // change to count comments across 
 					)
 					AND (
 					node_node_1.nid =%d)', 0, $nid));
-			echo $nid.' translated: '.$cache[$nid].'<br>';	
 		}
  	}
 
