@@ -4,7 +4,7 @@
 
 ### What is it?
 
-Cats is a Drupal 6 module / view solution for displaying all comments and comment statistics (count, new count) belonging to a translation set with each node of the set. So basically, for the English original blog entry, you see the comments of the German translation and vice versa. Additionally, it adds consistency to the node link section: teaser and full node display comment count, new comment count, and add new comment links.
+Cats is a Drupal 6 module / view solution for displaying all comments and comment statistics (count, new count) belonging to a translation set with each node of the set. So for an English original blog entry, you additionally see the comments of the German translation and vice versa. Additionally, it adds consistency to the node link section: teaser and full node display comment count, new comment count, and add new comment links.
 
 ### How to use
 
